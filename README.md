@@ -1,26 +1,76 @@
 Examine the following Solidity code for a basic lending protocol. Identify any security vulnerabilities in the code, particularly related to flash loan attacks, and rewrite it to prevent such vulnerabilities.
 
-
 pragma solidity ^0.8.0;
-contract LendingProtocol {
-    mapping(address => uint) public balances;
-    uint public totalLent;
 
-    function deposit() public payable {
-        balances[msg.sender] += msg.value;
-        totalLent += msg.value;
+contract LendingProtocol {
+    struct User {
+        uint deposited; // Collateral deposited by the user
+        uint borrowed;  // Amount borrowed by the user
     }
 
-    function borrow(uint amount) public {
-        require(amount <= totalLent, "Insufficient funds");
-        balances[msg.sender] += amount;
-        totalLent -= amount;
+    mapping(address => User) public users;
+    uint public totalLent;
+
+    // Interest rate (e.g., 5% annualized in basis points)
+    uint public interestRateBasisPoints = 500; 
+    uint public totalCollateral;
+
+    modifier nonZeroAmount(uint amount) {
+        require(amount > 0, "Amount must be greater than zero");
+        _;
+    }
+
+    function deposit() external payable nonZeroAmount(msg.value) {
+        users[msg.sender].deposited += msg.value;
+        totalCollateral += msg.value;
+    }
+
+    function borrow(uint amount) external nonZeroAmount(amount) {
+        User storage user = users[msg.sender];
+        require(user.deposited > 0, "No collateral deposited");
+        require(user.borrowed == 0, "Existing loan must be repaid first");
+        require(
+            amount <= user.deposited / 2,
+            "Can only borrow up to 50% of collateral"
+        );
+        require(amount <= address(this).balance, "Insufficient protocol funds");
+
+        // Update user and protocol state
+        user.borrowed += amount;
+        totalLent += amount;
+
+        // Transfer borrowed amount to the user
         (bool sent, ) = msg.sender.call{value: amount}("");
         require(sent, "Transfer failed");
     }
 
-    function repay() public payable {
-        balances[msg.sender] -= msg.value;
-        totalLent += msg.value;
+    function repay() external payable nonZeroAmount(msg.value) {
+        User storage user = users[msg.sender];
+        require(user.borrowed > 0, "No outstanding loan to repay");
+
+        // Calculate interest on the loan
+        uint interest = (user.borrowed * interestRateBasisPoints) / 10000;
+        uint totalOwed = user.borrowed + interest;
+
+        require(msg.value >= totalOwed, "Repayment must cover loan and interest");
+
+        // Update user and protocol state
+        user.borrowed = 0;
+        totalLent -= totalOwed;
+
+        // Refund any excess repayment
+        if (msg.value > totalOwed) {
+            uint excess = msg.value - totalOwed;
+            (bool refunded, ) = msg.sender.call{value: excess}("");
+            require(refunded, "Refund failed");
+        }
+    }
+
+    function getCollateral(address user) external view returns (uint) {
+        return users[user].deposited;
+    }
+
+    function getOutstandingLoan(address user) external view returns (uint) {
+        return users[user].borrowed;
     }
 }
