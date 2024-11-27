@@ -1,7 +1,7 @@
 Examine the following Solidity code for a basic lending protocol. Identify any security vulnerabilities in the code, particularly related to flash loan attacks, and rewrite it to prevent such vulnerabilities.
 
-pragma solidity ^0.8.0;
 
+pragma solidity ^0.8.0;
 contract LendingProtocol {
     mapping(address => uint) public balances;
     uint public totalLent;
